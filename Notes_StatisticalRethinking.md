@@ -86,7 +86,7 @@ precis(globe.qa)
 ```
 
            mean        sd      5.5%     94.5%
-    p 0.6666673 0.1571336 0.4155375 0.9177972
+    p 0.6666668 0.1571337 0.4155368 0.9177969
 
 ## Compare how good the approximation is
 
@@ -314,4 +314,4 @@ simplehist(post_pred_samples, xlab="Number of water tosses")
 
 ![](Notes_StatisticalRethinking_files/figure-commonmark/unnamed-chunk-10-5.png)
 
-test
+test123
