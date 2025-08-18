@@ -1,8 +1,12 @@
 ---
-title: "Notes_StatisticalRethinking-RichardMcElreath"
+title: "Notes_StatisticalRethinking"
 author: "Krisma Adiwibawa"
-format: html
-editor: visual
+format: gfm
+editor:
+  markdown: 
+    wrap: sentence
+editor_options:
+  chunk_output_type: console
 ---
 
 ## Globe tossing (Grid Approximation)
@@ -194,4 +198,4 @@ simplehist(post_pred_samples, xlab="Number of water tosses")
 
 ```
 
-test
+test123
