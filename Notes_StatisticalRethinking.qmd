@@ -9,6 +9,10 @@ editor_options:
   chunk_output_type: console
 ---
 
+```{r}
+library(rethinking)
+```
+
 ## Chapter 2: Small Worlds and Large Worlds
 
 ### Grid Approximation in the Globe Tossing Context
@@ -340,3 +344,213 @@ text(actual_boys_after_girls, max(table(posterior_samples)),
 ```
 
 ## Chapter 4 - Geocentric Models
+
+### Grid Approximation applied to a model with more than one parameter
+
+```{r}
+pos <- replicate(1000, sum(runif(16,-1,1)))
+
+hist(pos)
+plot(density(pos))
+```
+
+```{r}
+growth <- replicate(10000, prod(1+runif(12, 0, 0.1)))
+dens(growth, norm.comp=TRUE)
+```
+
+```{r}
+big <- replicate(10000, prod(1+(runif(12, 0, 0.5))))
+small <- replicate(10000, prod(1+(runif(12, 0, 0.1))))
+
+dens(big, norm.comp=TRUE)
+dens(small, norm.comp=TRUE)
+```
+
+```{r}
+log.big <- replicate(10000, log(prod(1+(runif(12, 0, 0.5)))))
+dens(log.big, norm.comp=TRUE)
+```
+
+```{r}
+w <- 6; n <- 9
+p_grid <- seq(from=0, to=1, length.out=100)
+posterior <- dbinom(w, n, p_grid) * dunif(p_grid, 0, 1)
+posterior <- posterior/sum(posterior)
+# dunif(p_grid, 0, 1) = d --> density, it is giving the probability density function (PDF), in this case, of a uniform distribution. So for every p_grid it gives probability of '1'.
+
+samples <- sample(p_grid, size=10000, replace=TRUE, prob=posterior)
+
+# plot the p_grid and posterior probability
+plot(p_grid, posterior, type='b', xlab="p_grid", ylab="posterior probability")
+
+# plot the simulated samples of 10000 p_grid with probabilities from the posterior
+dens(samples)
+
+# summary metrics
+p_grid[which.max(posterior)]
+# MAP (maximum a posteriori) from posterior / the index of p_grid which has the highest posterior
+chainmode(samples, adj=0.01)
+# MAP (maximum a posteriori) from samples / find the mode of a continuous density estimate
+HPDI(samples, 0.05) # Highest Posterior Density Interval
+PI(samples, 0.05) # Percentiles Interval
+```
+
+```{r}
+library(rethinking)
+data(Howell1)
+# str(Howell1)
+d <- Howell1
+# precis(d)
+
+d$height # return the column 'height' only from data frame 'd'
+
+d2 <- d[d$age >= 18,] # filter only the rows where the age is >= 18
+
+# plot the distribution of heights
+dens(d2$height)
+
+# plot the prior of height
+curve(dnorm(x,, 178, 20), from=100, to=250)
+
+# plot the prior of standard deviation (flat and uniform, just to constrain SD to have a positive probability between zero and 50cm)
+curve(dunif(x, 0, 50), from=10, to=60)
+
+# simulating heights by sampling from the prior
+sample_mu <- rnorm(1e4, 178, 20)
+sample_sigma <- runif(1e4, 0, 50)
+prior_h <- rnorm(1e4, sample_mu, sample_sigma)
+dens(prior_h)
+
+# Grid Approximation
+mu.list <- seq(from=150, to=160, length.out=100)
+sigma.list <- seq(from=7, to=9, length.out=100)
+post <- expand.grid(mu=mu.list, sigma=sigma.list)
+post$LL <- sapply(1:nrow(post),
+                  function(i) sum(
+                        dnorm(d2$height, post$mu[i], post$sigma[i], log=TRUE)
+                  ))
+post$prod <- post$LL + dnorm(post$mu, 178, 20, TRUE) + dunif(post$sigma, 0, 50, TRUE)
+post$prob <- exp(post$prod - max(post$prod))
+# posterior resides in post$prob
+
+# simple contour plot
+contour_xyz(post$mu, post$sigma, post$prob)
+
+# simple heat map
+image_xyz(post$mu, post$sigma, post$prob)
+
+# Again, we sample the parameter values of p from the posterior. But because we have 2 parameters here we want to sample combinations of them, the new trick is:
+# first, randomly sample row numbers in 'post' in proportion to the values in 'post$prob'.
+# Then, we pull out the parameter values on those randomly sampled rows.
+
+# This code will do it:
+sample.rows <- sample(1:nrow(post), size=1e4, replace=TRUE, prob=post$prob)
+sample.mu <- post$mu[sample.rows]
+sample.sigma <- post$sigma[sample.rows]
+# You end up with 10000 samples, with replacement, from the posterior for the height data.
+
+plot(sample.mu, sample.sigma, cex=1, pch=16, col=col.alpha(rangi2, 0.22))
+# Samples from the posterior distribution for the heights data. The density of points is highest in the center, reflecting the most plausible combinations of mu and sigma.
+
+# Now that you have these samples, you can describe the distribution of confidence in each  combination of mu and sigma by summarizing the samples.
+
+# To characterize the shapes of the 'marginal' posterior densities of mu and sigma, all we need to do is:
+dens(sample.mu)
+dens(sample.sigma)
+
+# to summarize the widths of these densities with posterior compatibility intervals:
+PI(sample.mu)
+PI(sample.sigma)
+# Since these samples are just vectors of numbers, you can compute any statistic from them that you could from ordinary data: mean, median, or quantile, for example.
+summary(sample.mu)
+summary(sample.sigma)
+```
+
+### Quadratic Approximation to the same model (parameters: mu and sigma)
+
+```{r}
+# Quadratic Approximation's goal is to quickly make inferences about the shape of the posterior. The posterior's peak will lie at the Maximum A Posteriori (MAP) estimate, and we can get a useful image of the posterior's shape by using the quadratic approximation of the posterior distribution at this peak.
+
+library(rethinking)
+data(Howell1)
+d <- Howell1
+d2 <- d[d$age >= 18,]
+
+# Now we define the model using R's formula syntax:
+flist <- alist(
+           height ~ dnorm(mu, sigma),
+           mu ~ dnorm(178, 20),
+           sigma ~ dunif(0, 50)
+)
+
+# Now we fit the model to the data in the data frame d2 with:
+m4.1 <- quap(flist, data=d2)
+
+# AFter executing this code, you'll have a fit model stored in the symbol m4.1. Now take a look at the posterior:
+precis(m4.1)
+# These numbers provide Gaussian approximations for each parameter's 'marginal' distribution. This means the plausibility of each value of mu, after averaging over the plausibilities of each value of sigma, is given by a Gaussian distribution with mean 154.6 and standard deviation 0.4
+
+# Sampling from quap.
+# How do you then get samples from the quadratic approximation of the posterior distribution? The answer is rather simple, but non-obvious, and it requires recognizing that a quadratic approximation to a posterior distribution with more  than one parameter dimension – mu and sigma each contribute one dimension – is just a multi-dimensional Gaussian distribution.
+# As a consequence, when R constructs a quadratic approximation, it calculates not only standard deviations for all parameters, but also the covariances among all pairs of  parameters.
+# To see this matrix of variances and covariances, for model m4.1, use:
+vcov(m4.1)
+
+# It is composed of
+# (1) a vector of variances for the parameters
+diag(vcov(m4.1))
+# (2) a correlation matrix that tells us how changes in any parameter lead to correlated changes in others
+cov2cor(vcov(m4.1))
+
+# So how do we get samples from this multi-dimensional posterior? Now instead of sampling single values from a simple Gaussian distribution, we sample vectors of values from a multi-dimensional Gaussian distribution. The 'rethinking' package provides a convenience function to do just that:
+library(rethinking)
+post <- extract.samples(m4.1, n=1e4)
+head(post)
+# You end up with a data frame, post, with 10000 (1e4) rows and two columns, one column for mu and one for sigma. Each value is a sample from the posterior, so the mean and standard deviation of each column will be very close to the MAP values from before. You can confirm this by summarizing the samples:
+precis(post)
+
+# We can plot it too:
+plot(post)
+
+# The high degree of similarity between the 'post' from quadratic approximation and 'm4.1 from grid approximation is because these samples also preserve the covariance between mu and sigma.
+```
+
+When a predictor variable is built inside the model in a particular way , we'll have a linear regression.
+So, now let's look at how height in these Kalahari foragers (the outcome variable) covaries with weight (the predictor variable).
+
+Go ahead and plot adult height and weight against one another:
+
+```{r}
+library(rethinking)
+data(Howell1)
+
+d <- Howell1
+d2 <- d[d$age >=18,]
+
+plot (d2$height ~ d2$weight)
+```
+
+How do we take our Gaussian model from the previous section and incorporate predictor variables?
+
+The linear model strategy.
+The strategy is to make the parameter for the mean of a Gaussian distribution, mu, into a linear function of the predictor variable and other, new parameters that we invent.
+
+We ask the golem: "Consider all the lines that relate one variable to the other. Rank all of these lines by plausibility, given these data." The golem answers with a posterior distribution.
+
+```{r}
+# define the average weight, x-bar
+xbar <- mean(d2$weight)
+
+# fit model
+m4.3 <- quap(
+        alist(
+          height ~ dnorm(mu, sigma),
+          mu <- a + b*(weight-xbar),
+          a ~ dnorm(178, 20),
+          b ~ dlnorm(0,1), # dlnorm is log-normal distribution to enforce positive values; see p. 96.
+          sigma ~ dunif(0,50)),
+        data=d2)
+
+
+```
