@@ -401,17 +401,20 @@ library(rethinking)
 data(Howell1)
 # str(Howell1)
 d <- Howell1
+# str(d)
+View(d)
 # precis(d)
 
 d$height # return the column 'height' only from data frame 'd'
 
 d2 <- d[d$age >= 18,] # filter only the rows where the age is >= 18
+# View(d2)
 
 # plot the distribution of heights
-dens(d2$height)
+precis(d2$height)
 
 # plot the prior of height
-curve(dnorm(x,, 178, 20), from=100, to=250)
+curve(dnorm(x, 178, 20), from=100, to=250)
 
 # plot the prior of standard deviation (flat and uniform, just to constrain SD to have a positive probability between zero and 50cm)
 curve(dunif(x, 0, 50), from=10, to=60)
@@ -422,23 +425,57 @@ sample_sigma <- runif(1e4, 0, 50)
 prior_h <- rnorm(1e4, sample_mu, sample_sigma)
 dens(prior_h)
 
-# Grid Approximation
+##########################
+### Grid Approximation ###
+##########################
+
+### Creates a sequence of 100 evenly spaced candidate values for both the mean (mu from 150 to 160) and the standard deviation (sigma from 7 to 9)
 mu.list <- seq(from=150, to=160, length.out=100)
 sigma.list <- seq(from=7, to=9, length.out=100)
+
+### Combines these two lists into a massive grid containing every possible combination of mu and sigma ($100 \times 100 = 10,000$ parameter pairs)
 post <- expand.grid(mu=mu.list, sigma=sigma.list)
+View(post)
+
+### dnorm(..., log=TRUE): Calculates the log-likelihood of each data point in d2$height given a specific candidate pair of mu and sigma.
+### sapply(...): Loops through all 10,000 parameter combinations in the grid, calculates the likelihood for each data point, and sums them up (sum(...)) to get the total log-likelihood for that specific grid point.
 post$LL <- sapply(1:nrow(post),
                   function(i) sum(
                         dnorm(d2$height, post$mu[i], post$sigma[i], log=TRUE)
                   ))
-post$prod <- post$LL + dnorm(post$mu, 178, 20, TRUE) + dunif(post$sigma, 0, 50, TRUE)
+
+### In Bayesian statistics, Posterior = Likelihood x Prior. Because the code is working on a log scale, multiplication becomes addition
+### (1) post$LL: The log-likelihood calculated in the previous step.
+### (2) dnorm(post$mu, 178, 20, TRUE): The log-prior for mu, assuming a normal distribution centered at 178 with a standard deviation of 20.
+### (3) dunif(post$sigma, 0, 50, TRUE): The log-prior for sigma, assuming a uniform distribution between 0 and 50.
+post$prod <- post$LL + dnorm(post$mu, 178, 20, log=TRUE) + dunif(post$sigma, 0, 50, log=TRUE)
+View(as.data.frame(post$prod))
+### The above line combines (1), (2), and (3) to yield the unnormalized log-posterior.
+
+### Because mu is continuous, the single output value of dnorm(...) is a log probability density (the height of the curve at that exact point).
+### However, in grid approximation, because every point on the grid represents an equal, tiny interval along the mu axis, density is directly proportional to probability.
+### Because the width of every single slice on the grid is the exact same, multiplying every prior density by that step-size width would just scale all the numbers by the same constant. When we finally normalize your posterior probabilities so they add up to 1, that constant factor cancels out entirely.
+
 post$prob <- exp(post$prod - max(post$prod))
 # posterior resides in post$prob
+### exp(...): Converts the log-posterior back to the natural probability scale.
+### - max(post$prod): A standard numerical stability trick. Subtracting the maximum log-value before exponentiating prevents computer underflow errors (where very small numbers round down to zero).
+### The values in post$prod are log-probabilities. Because they are on the log scale, they are often large negative numbers (for example, -5000, -5012, -5050).
+### If you try to convert them back to normal probabilities using exp(-5000), the number is so infinitesimally close to zero that a computer's memory cannot handle it. It rounds the number down to a literal 0.
+### By subtracting the maximum value (max(post$prod)), you shift the entire set of numbers:
+### The peak (maximum) log-value becomes 0 (since max - max = 0).
+### All other log-values become smaller negative numbers relative to the peak (e.g., -2, -10, -50).
+### exp(0) becomes 1 (the peak probability).
+### The other values become safe, manageable fractions between 0 and 1 (like 0.13 or 0.00005) instead of zero.
+
+View(post)
 
 # simple contour plot
 contour_xyz(post$mu, post$sigma, post$prob)
 
 # simple heat map
 image_xyz(post$mu, post$sigma, post$prob)
+
 
 # Again, we sample the parameter values of p from the posterior. But because we have 2 parameters here we want to sample combinations of them, the new trick is:
 # first, randomly sample row numbers in 'post' in proportion to the values in 'post$prob'.
@@ -450,14 +487,19 @@ sample.mu <- post$mu[sample.rows]
 sample.sigma <- post$sigma[sample.rows]
 # You end up with 10000 samples, with replacement, from the posterior for the height data.
 
-plot(sample.mu, sample.sigma, cex=1, pch=16, col=col.alpha(rangi2, 0.22))
+### 1:nrow(post): Gives R a list of all 10,000 row numbers in your grid.
+### size = 1e4: Tells R to draw 10,000 samples (10^4).
+### replace = TRUE: Allows R to pick the same row more than once (crucial, because some grid points will be picked many times if they have high probability).
+### prob = post$prob: This turns the selection into a weighted lottery. Grid rows with a high posterior probability are much more likely to be picked than rows with a low probability.
+
+plot(sample.mu, sample.sigma, cex=1.4, pch=15, col=col.alpha(rangi2, 0.05))
 # Samples from the posterior distribution for the heights data. The density of points is highest in the center, reflecting the most plausible combinations of mu and sigma.
 
 # Now that you have these samples, you can describe the distribution of confidence in each  combination of mu and sigma by summarizing the samples.
 
 # To characterize the shapes of the 'marginal' posterior densities of mu and sigma, all we need to do is:
-dens(sample.mu)
-dens(sample.sigma)
+dens(sample.mu, norm.comp=TRUE)
+dens(sample.sigma, norm.comp=TRUE)
 
 # to summarize the widths of these densities with posterior compatibility intervals:
 PI(sample.mu)
@@ -465,6 +507,28 @@ PI(sample.sigma)
 # Since these samples are just vectors of numbers, you can compute any statistic from them that you could from ordinary data: mean, median, or quantile, for example.
 summary(sample.mu)
 summary(sample.sigma)
+
+
+##################################################################################
+### Sample size and the normality of sigma's posterior (Trial if only 20 data) ###
+##################################################################################
+d3 <- sample(d2$height, size=20)
+
+mu.list <- seq( from=150, to=170, length.out=200 )
+sigma.list <- seq( from=4, to=20, length.out=200 )
+post2 <- expand.grid( mu=mu.list, sigma=sigma.list )
+post2$LL <- sapply( 1:nrow(post2), function(i)
+              sum( dnorm(d3, mean=post2$mu[i], sd=post2$sigma[i], log=TRUE) )
+              )
+post2$prod <- post2$LL + dnorm(post2$mu, 178, 20, log=TRUE) + dnorm(post2$sigma, 0, 50)
+post2$prob <- exp(post2$prod - max(post2$prod))
+sample2.rows <- sample(1:nrow(post2), size=1e4, replace=TRUE, prob=post2$prob)
+sample2.mu <- post2$mu[sample2.rows]
+sample2.sigma <- post2$sigma[sample2.rows]
+plot(sample2.mu, sample2.sigma, cex=0.5, col=col.alpha(rangi2, 0.1),
+     xlab="mu", ylab="sigma", pch=16)
+
+dens(sample2.sigma, norm.comp=TRUE)
 ```
 
 ### Quadratic Approximation to the same model (parameters: mu and sigma)
